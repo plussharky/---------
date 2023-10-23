@@ -7,114 +7,101 @@ import requests
 import re
 import os
     
-# Список URL которые уже есть в базе
-completed_urls = []
+def get_domain_from_url(url: str):
+    domain = url.split('//')[-1].split('/')[0].split('?')[0].split(':')[0]
+    return domain
 
-# Список очереди URL на парсинг
-urls_to_parse = []
+# Папка датасета
+dataset_directory = 'dataset'
 
+## Настройка драйвера Google Chrome
+# Разрешение скриншотов (ширина х высота)
+desired_width = 1280
+desired_height = 720
 # Путь до драйвера Google Chrome
 driver_path = 'C:\\Users\\Plusharky\\Desktop\\Уник\\Дипломчик\\ChromeDriver\\chromedriver.exe'
+# Create Chrome options
+options = webdriver.ChromeOptions()
+options.add_argument('--headless')  # This runs Chrome in headless mode (without opening a window)
+# Create a new ChromeService instance for each URL
+chrome_service = ChromeService(executable_path=driver_path)
+# Create a new Chrome webdriver instance
+driver = webdriver.Chrome(service=chrome_service, options=options)
+# Set the window size to the desired resolution
+driver.set_window_size(desired_width, desired_height)
 
 # Подключение к базе данных
 db_helper = DatabaseHelper('database.db')
 
-# Последний ID сайта
-last_id = db_helper.get_last_id()
-
-# Разрешение скриншотов (ширина х высота)
-desired_width = 1280
-desired_height = 720
-
-# Create Chrome options
-options = webdriver.ChromeOptions()
-options.add_argument('--headless')  # This runs Chrome in headless mode (without opening a window)
-
 def scrape_and_save_data(url):
-     # Create a new ChromeService instance for each URL
-    chrome_service = ChromeService(executable_path=driver_path)
-    
-    # Create a new Chrome webdriver instance
-    driver = webdriver.Chrome(service=chrome_service, options=options)
-    
-    # Set the window size to the desired resolution
-    driver.set_window_size(desired_width, desired_height)
     try:
         response = requests.get(url)
+            # Extract site name from URL
+        site_name = get_domain_from_url(url)
+        
+        # Create a directory for each site
+        site_directory = str(db_helper.get_last_id())
+        full_path = os.path.join(dataset_directory, site_directory)
+        os.makedirs(full_path, exist_ok=True)
+        
+        # Save a screenshot
+        screenshot_filename = f"screenshot-{site_name}.png"
+        screenshot_path = os.path.join(full_path, screenshot_filename)
+        driver.get(url)
+        driver.save_screenshot(screenshot_path)
+        
+        # Extract text from the site
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        text = soup.get_text()
+        
+        #добавить найденные URL в очередь
+        # Add the found URLs to urls_to_parse
+        links = soup.find_all('a', href=True)
+        url_array = [link['href'] for link in links if link['href'].startswith(('http://', 'https://'))]
+        add_finded_URLs(url_array)
+
+        # Save the text to a text file
+        text_filename = f"text-{site_name}.txt"
+        with open(os.path.join(full_path, text_filename), "w", encoding="utf-8") as text_file:
+            text_file.write(text)
+        
+        db_helper.write_in_DB(url, os.path.abspath(screenshot_path), text)
+
+        print(f"Сохранены данные для сайта {url} в папку {full_path}")
+        
+        driver.quit()
     except:
         print(f"Не удалось получить доступ к сайту {url}")
         driver.quit()
+        db_helper.add_to_error(url)
         return
     
-    # Extract site name from URL
-    site_name = url_to_windows_folder_name(url)
-    
-    # Create a directory for each site
-    site_directory = f"./{site_name}"
-    os.makedirs(site_directory, exist_ok=True)
-    
-    # Save a screenshot
-    screenshot_filename = f"screenshot-{site_name}.png"
-    driver.get(url)
-    driver.save_screenshot(os.path.join(site_directory, screenshot_filename))
-    
-    # Extract text from the site
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    text = soup.get_text()
-    
-    #добавить найденные URL в очередь
-    add_finded_URLs(soup)
 
-    # Save the text to a text file
-    text_filename = f"text-{site_name}.txt"
-    with open(os.path.join(site_directory, text_filename), "w", encoding="utf-8") as text_file:
-        text_file.write(text)
-    
-    print(f"Сохранены данные для сайта {url} в папку {site_directory}")
-    
-    driver.quit()
 
-def url_to_windows_folder_name(url):
-    # Удаление недопустимых символов
-    cleaned_name = re.sub(r'[\/:*?"<>|]', '_', url)
-
-    # Обрезка имени, если оно слишком длинное (максимум 255 символов в Windows)
-    max_length = 200
-    if len(cleaned_name) > max_length:
-        cleaned_name = cleaned_name[:max_length]
-
-    return cleaned_name
-
-def add_finded_URLs(soup):
-
-    # Add the found URLs to urls_to_parse
-    links = soup.find_all('a', href=True)
-
+def add_finded_URLs(links):
     # Extract and add the URLs to urls_to_parse
     for link in links:
-        found_url = link['href']
-        if found_url.startswith("http") or found_url.startswith("https"):
-            if found_url not in urls_to_parse:
-                if found_url not in completed_urls:
-                    urls_to_parse.append(found_url)
+        if db_helper.check_url_exist(link):
+            continue
+        db_helper.add_to_queue(link)
 
 def get_completed_urls(directory):
     completed_urls = []
     for root, dirs, files in os.walk(directory):
         for dir_name in dirs:
             completed_urls.append()
-    return completed_urls
+    return completed_urls 
 
+#first_url = input("Введите url: ")
+first_url = 'https://infoselection.ru/infokatalog/internet-i-programmy/internet-osnovnoe/item/90-50-samykh-poseshchaemykh-sajtov-runeta'
+db_helper.add_to_queue(first_url)
 
-
-
-
-
-first_url = input("Введите url: ")
-urls_to_parse.append(first_url)
-
-for url in urls_to_parse:
+while True:
+    url = db_helper.get_first_from_queue()
+    if url == None:
+        break
     scrape_and_save_data(url)
-    completed_urls.append(url_to_windows_folder_name(url))
+    db_helper.remove_from_queue(url)
 
-conn.close()
+
+db_helper.close_connection()
