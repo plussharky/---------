@@ -33,48 +33,56 @@ driver.set_window_size(desired_width, desired_height)
 # Подключение к базе данных
 db_helper = DatabaseHelper('database.db')
 
-def scrape_and_save_data(url):
+def scrape_and_save_data(url: str):
     try:
         response = requests.get(url)
-            # Extract site name from URL
-        site_name = get_domain_from_url(url)
-        
-        # Create a directory for each site
-        site_directory = str(db_helper.get_last_id())
-        full_path = os.path.join(dataset_directory, site_directory)
-        os.makedirs(full_path, exist_ok=True)
-        
-        # Save a screenshot
-        screenshot_filename = f"screenshot-{site_name}.png"
-        screenshot_path = os.path.join(full_path, screenshot_filename)
-        driver.get(url)
-        driver.save_screenshot(screenshot_path)
-        
-        # Extract text from the site
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        text = soup.get_text()
-        
-        #добавить найденные URL в очередь
-        # Add the found URLs to urls_to_parse
-        links = soup.find_all('a', href=True)
-        url_array = [link['href'] for link in links if link['href'].startswith(('http://', 'https://'))]
-        add_finded_URLs(url_array)
-
-        # Save the text to a text file
-        text_filename = f"text-{site_name}.txt"
-        with open(os.path.join(full_path, text_filename), "w", encoding="utf-8") as text_file:
-            text_file.write(text)
-        
-        db_helper.write_in_DB(url, os.path.abspath(screenshot_path), text)
-
-        print(f"Сохранены данные для сайта {url} в папку {full_path}")
-        
-        driver.quit()
     except:
         print(f"Не удалось получить доступ к сайту {url}")
         driver.quit()
         db_helper.add_to_error(url)
         return
+    
+    # Extract site name from URL
+    site_name = get_domain_from_url(url)
+    
+    # Create a directory for each site
+    site_directory = str(db_helper.get_last_id())
+    full_path = os.path.join(dataset_directory, site_directory)
+    os.makedirs(full_path, exist_ok=True)
+    
+
+    try:
+        #Save a screenshot
+        screenshot_filename = f"screenshot-{site_name}.png"
+        screenshot_path = os.path.join(full_path, screenshot_filename)
+        driver.get(url)
+        driver.save_screenshot(screenshot_path)
+    except:
+        print(f"Не удалось сделать скриншот {url}")
+        driver.quit()
+        db_helper.add_to_error(url)
+        return
+    
+    # Extract text from the site
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    text = soup.get_text()
+    
+    #добавить найденные URL в очередь
+    # Add the found URLs to urls_to_parse
+    links = soup.find_all('a', href=True)
+    url_array = [link['href'] for link in links if link['href'].startswith(('http://', 'https://'))]
+    add_finded_URLs(url_array)
+
+    # Save the text to a text file
+    text_filename = f"text-{site_name}.txt"
+    with open(os.path.join(full_path, text_filename), "w", encoding="utf-8") as text_file:
+        text_file.write(text)
+    
+    db_helper.write_in_DB(url, os.path.abspath(screenshot_path), text)
+
+    print(f"Сохранены данные для сайта {url} в папку {full_path}")
+    
+
     
 
 
@@ -103,5 +111,5 @@ while True:
     scrape_and_save_data(url)
     db_helper.remove_from_queue(url)
 
-
+driver.quit()
 db_helper.close_connection()
