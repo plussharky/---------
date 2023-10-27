@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.options import Options
 from database_helper import DatabaseHelper
 import sqlite3
 import asyncio
@@ -29,6 +30,7 @@ driver_path = 'C:\\Users\\Plusharky\\Desktop\\Уник\\Дипломчик\\Chro
 # Create Chrome options
 options = webdriver.ChromeOptions()
 options.add_argument('--headless')  # This runs Chrome in headless mode (without opening a window)
+options.add_argument('--ignore-certificate-errors')
 # Create a new ChromeService instance for each URL
 chrome_service = ChromeService(executable_path=driver_path)
 # Create a new Chrome webdriver instance
@@ -70,6 +72,7 @@ async def scrape_and_save_data(url: str):
             db_helper.write_in_DB(url, os.path.abspath(screenshot_path), text)
             print(f"Сохранены данные для сайта {url} в папку {full_path}")
         except Exception as e:
+            db_helper.add_to_error(url)
             print(f"Не удалось обработать сайт {url} по причине  в папку {e}")
 
 def add_finded_URLs(links):
