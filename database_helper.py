@@ -68,7 +68,7 @@ class DatabaseHelper:
 
     def get_first_from_queue(self):
         try:
-            self.cursor.execute("SELECT url FROM queue LIMIT 1")
+            self.cursor.execute("SELECT url FROM queue ORDER BY RANDOM() LIMIT 1")
             result = self.cursor.fetchone()
             if result:
                 return result[0]
@@ -77,6 +77,25 @@ class DatabaseHelper:
                 return None
         except sqlite3.Error as e:
             print("Ошибка при получении первой записи из очереди:", e)
+
+    def get_url_with_min_domain_count(self):
+        try:
+            # Выбираем уникальные домены из таблицы "website_data" и подсчитываем количество записей для каждого домена
+            self.cursor.execute('SELECT domain, COUNT(*) FROM website_data GROUP BY domain')
+            domain_counts = self.cursor.fetchall()
+
+            # Находим домен с наименьшим количеством записей
+            min_domain = min(domain_counts, key=lambda x: x[1])
+
+            # Выбираем URL из таблицы "queue" с наименьшим доменом
+            self.cursor.execute('SELECT URL FROM queue WHERE domain_ID = (SELECT ID FROM domains WHERE domain = ?)', (min_domain[0],))
+            url = self.cursor.fetchone()
+
+            print(f"Выбранный URL с наименьшим доменом: {url[0]}")
+
+            return url[0] if url else None
+        except sqlite3.Error as e:
+            print("Ошибка при получении записи из очереди с наименьшим количеством данных:", e)
 
     # Методы для работы с таблицей error_website
     def add_to_error(self, url: str):

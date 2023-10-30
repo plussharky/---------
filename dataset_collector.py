@@ -95,7 +95,7 @@ db_helper.add_to_queue(first_url)
 
 async def main():
     while True:
-        url = db_helper.get_first_from_queue()
+        url = db_helper.get_url_with_min_domain_count()
         if url == None:
             break
         await scrape_and_save_data(url)
