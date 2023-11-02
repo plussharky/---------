@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
+from urllib.parse import urlparse
 from database_helper import DatabaseHelper
 import sqlite3
 import asyncio
@@ -11,7 +12,8 @@ import re
 import os
     
 def get_domain_from_url(url: str):
-    domain = url.split('//')[-1].split('/')[0].split('?')[0].split(':')[0]
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc
     return domain
 
 async def fetch(session, url):
@@ -47,13 +49,13 @@ async def scrape_and_save_data(url: str):
             html = await fetch(session, url)
             soup = BeautifulSoup(html, "html.parser")
             # Extract site name from URL
-            site_name = get_domain_from_url(url)
+            domain = get_domain_from_url(url)
             # Create a directory for each site
             site_directory = str(db_helper.get_last_id())
             full_path = os.path.join(dataset_directory, site_directory)
             os.makedirs(full_path, exist_ok=True)
             # Save a screenshot
-            screenshot_filename = f"screenshot-{site_name}.png"
+            screenshot_filename = f"screenshot-{domain}.png"
             screenshot_path = os.path.join(full_path, screenshot_filename)
             driver.get(url)
             driver.implicitly_wait(10)
@@ -65,14 +67,14 @@ async def scrape_and_save_data(url: str):
             url_array = [link['href'] for link in links if link['href'].startswith(('http://', 'https://'))]
             add_finded_URLs(url_array)
             # Save the text to a text file
-            text_filename = f"text-{site_name}.txt"
+            text_filename = f"text-{domain}.txt"
             with open(os.path.join(full_path, text_filename), "w", encoding="utf-8") as text_file:
                 text_file.write(text)
             
-            db_helper.write_in_DB(url, os.path.abspath(screenshot_path), text)
+            db_helper.write_in_data(url, os.path.abspath(screenshot_path), text, domain)
             print(f"Сохранены данные для сайта {url} в папку {full_path}")
         except Exception as e:
-            db_helper.add_to_error(url)
+            db_helper.add_to_error(url, get_domain_from_url(url))
             print(f"Не удалось обработать сайт {url} по причине  в папку {e}")
 
 def add_finded_URLs(links):
@@ -80,26 +82,29 @@ def add_finded_URLs(links):
     for link in links:
         if db_helper.check_url_exist(link):
             continue
-        db_helper.add_to_queue(link)
+        
+        domain = get_domain_from_url(link)
 
-def get_completed_urls(directory):
-    completed_urls = []
-    for root, dirs, files in os.walk(directory):
-        for dir_name in dirs:
-            completed_urls.append()
-    return completed_urls 
+        db_helper.add_to_queue(link, domain)
+        
+        if not db_helper.check_domain_exist(domain):
+            db_helper.write_in_domain(domain, 0, 0)
 
-#first_url = input("Введите url: ")
-first_url = 'https://infoselection.ru/infokatalog/internet-i-programmy/internet-osnovnoe/item/90-50-samykh-poseshchaemykh-sajtov-runeta'
-db_helper.add_to_queue(first_url)
+        db_helper.increment_domain_count_queue(domain)
 
 async def main():
     while True:
-        url = db_helper.get_url_with_min_domain_count()
+        row = db_helper.get_row_from_queue_with_min_domain_count()
+        url = row[1]
+        domain = row[2]
         if url == None:
             break
         await scrape_and_save_data(url)
+
+        db_helper.increment_domain_count_data(domain)
+
         db_helper.remove_from_queue(url)
+        db_helper.decrement_domain_count_queue(domain)
 
 asyncio.run(main())
 

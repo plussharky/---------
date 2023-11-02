@@ -10,7 +10,7 @@ class DatabaseHelper:
         self.conn.close()
 
     def check_url_exist(self, url: str):
-        return self.check_url_in_website_data(url) and self.check_url_in_queue(url)
+        return self.check_url_in_website_data(url) and self.check_url_in_queue(url) and self.check_url_in_error(url)
 
     # Методы для работы с таблицей website_data
     def get_last_id(self):
@@ -32,15 +32,15 @@ class DatabaseHelper:
             print("Ошибка при работе с базой данных:", e)
             return False
     
-    def write_in_DB(self, url, screenshot_path, site_text):
-        self.cursor.execute("INSERT INTO website_data (url, screenshot_path, site_text) VALUES (?, ?, ?)",
-                            (url, screenshot_path, site_text))
+    def write_in_data(self, url, screenshot_path, site_text, domain):
+        self.cursor.execute("INSERT INTO website_data (url, screenshot_path, site_text, domain) VALUES (?, ?, ?, ?)",
+                            (url, screenshot_path, site_text, domain))
         self.conn.commit()
 
     # Методы для работы с таблицей queue
-    def add_to_queue(self, url: str):
+    def add_to_queue(self, url: str, domain):
         try:
-            self.cursor.execute("INSERT INTO queue (URL) VALUES (?)", (url,))
+            self.cursor.execute("INSERT INTO queue (URL, domain) VALUES (?, ?)", (url, domain,))
             self.conn.commit()
             print(f'URL "{url}" добавлен в очередь')
         except sqlite3.Error as e:
@@ -78,31 +78,89 @@ class DatabaseHelper:
         except sqlite3.Error as e:
             print("Ошибка при получении первой записи из очереди:", e)
 
-    def get_url_with_min_domain_count(self):
+    def get_row_from_queue_with_min_domain_count(self):
         try:
             # Выбираем уникальные домены из таблицы "website_data" и подсчитываем количество записей для каждого домена
-            self.cursor.execute('SELECT domain, COUNT(*) FROM website_data GROUP BY domain')
-            domain_counts = self.cursor.fetchall()
+            self.cursor.execute('''
+                SELECT q.* 
+                FROM queue AS q
+                INNER JOIN (
+                    SELECT *
+                    FROM domains
+                    WHERE URLs_in_queue > 0 
+                    ORDER BY URLs_in_data 
+                    LIMIT 1) as d
+                ON d.domain = q.domain
+                LIMIT 1;
+            ''')
+            min_domain = self.cursor.fetchone()
 
-            # Находим домен с наименьшим количеством записей
-            min_domain = min(domain_counts, key=lambda x: x[1])
+            print(f"Выбранный URL с наименьшим доменом: {min_domain[1]}")
 
-            # Выбираем URL из таблицы "queue" с наименьшим доменом
-            self.cursor.execute('SELECT URL FROM queue WHERE domain_ID = (SELECT ID FROM domains WHERE domain = ?)', (min_domain[0],))
-            url = self.cursor.fetchone()
-
-            print(f"Выбранный URL с наименьшим доменом: {url[0]}")
-
-            return url[0] if url else None
+            return min_domain if min_domain else None
         except sqlite3.Error as e:
             print("Ошибка при получении записи из очереди с наименьшим количеством данных:", e)
 
     # Методы для работы с таблицей error_website
-    def add_to_error(self, url: str):
+    def add_to_error(self, url, domain):
         try:
-            self.cursor.execute("INSERT INTO error_website (URL) VALUES (?)", (url,))
+            self.cursor.execute("INSERT INTO error_website (URL, domain) VALUES (?, ?)", (url, domain,))
             self.conn.commit()
             print(f'URL "{url}" добавлен в список сайтов которые не получилось обработать')
         except sqlite3.Error as e:
             print("Ошибка при добавлении в список сайтов которые не получилось обработать:", e)
 
+    def check_url_in_error(self, url: str):
+        try:
+            self.cursor.execute("SELECT * FROM error_website WHERE URL=?", (url,))
+            result = self.cursor.fetchone()
+            if result:
+                return True
+            else:
+                return False
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+            return False
+        
+    # Методы для работы с таблицей domains
+    def check_domain_exist(self, domain: str):
+        try:
+            self.cursor.execute("SELECT * FROM domains WHERE domain=? LIMIT 1", (domain,))
+            result = self.cursor.fetchone()
+            if result:
+                return True
+            else:
+                return False
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+            return False
+        
+    def increment_domain_count_queue(self, domain: str):
+        try:
+            self.cursor.execute("UPDATE domains SET URLs_in_queue = URLs_in_queue + 1 WHERE domain = ?", (domain,))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+    
+    def decrement_domain_count_queue(self, domain: str):
+        try:
+            self.cursor.execute("UPDATE domains SET URLs_in_queue = URLs_in_queue - 1 WHERE domain = ?", (domain,))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+    
+    def increment_domain_count_data(self, domain: str):
+        try:
+            self.cursor.execute("UPDATE domains SET URLs_in_data = URLs_in_data + 1 WHERE domain = ?", (domain,))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+       
+    def write_in_domain(self, domain, queue_count, data_count):
+        try:
+            self.cursor.execute("INSERT INTO domains (domain, URLs_in_queue, URLs_in_data) VALUES (?, ?, ?)",
+                                (domain, queue_count, data_count))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+            return False
