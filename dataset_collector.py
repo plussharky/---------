@@ -10,6 +10,7 @@ import aiohttp
 import requests
 import re
 import os
+from langdetect import detect
     
 def get_domain_from_url(url: str):
     parsed_url = urlparse(url)
@@ -20,34 +21,56 @@ async def fetch(session, url):
     async with session.get(url) as response:
         return await response.text()
 
+def format_text(text):
+    try:
+        result = text
+        if define_language(text) == 'ru':
+            words = re.findall(r'\b\w+\b', text)
+            result = ' '.join(words)
+            result = re.sub(r'(?<=\w)(?=[А-Я])', ' ', result)
+        return result
+    except:
+        print(f"Language detection failed")
+        return text
+
+def define_language(text):
+    return detect(text)
+
 # Папка датасета
 dataset_directory = 'dataset'
 
-## Настройка драйвера Google Chrome
-# Разрешение скриншотов (ширина х высота)
-desired_width = 1280
-desired_height = 720
-# Путь до драйвера Google Chrome
-driver_path = 'C:\\Users\\Plusharky\\Desktop\\Уник\\Дипломчик\\ChromeDriver\\chromedriver.exe'
-# Create Chrome options
-options = webdriver.ChromeOptions()
-options.add_argument('--headless')  # This runs Chrome in headless mode (without opening a window)
-options.add_argument('--ignore-certificate-errors')
-# Create a new ChromeService instance for each URL
-chrome_service = ChromeService(executable_path=driver_path)
-# Create a new Chrome webdriver instance
-driver = webdriver.Chrome(service=chrome_service, options=options)
-# Set the window size to the desired resolution
-driver.set_window_size(desired_width, desired_height)
+def get_webdriver():
+    ## Настройка драйвера Google Chrome
+    # Разрешение скриншотов (ширина х высота)
+    desired_width = 1280
+    desired_height = 720
+    # Путь до драйвера Google Chrome
+    driver_path = 'C:\\Users\\Plusharky\\Desktop\\Уник\\Дипломчик\\ChromeDriver\\chromedriver.exe'
+    # Create Chrome options
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')  # This runs Chrome in headless mode (without opening a window)
+    options.add_argument('--ignore-certificate-errors')
+    # Create a new ChromeService instance for each URL
+    chrome_service = ChromeService(executable_path=driver_path)
+    # Create a new Chrome webdriver instance
+    driver = webdriver.Chrome(service=chrome_service, options=options)
+    # Set the window size to the desired resolution
+    driver.set_window_size(desired_width, desired_height)
+
+    return driver
 
 # Подключение к базе данных
 db_helper = DatabaseHelper('database.db')
 
 async def scrape_and_save_data(url: str):
     async with aiohttp.ClientSession() as session:
-        try:
-            html = await fetch(session, url)
-            soup = BeautifulSoup(html, "html.parser")
+            html = None
+            soup = None
+            try:
+                html = await fetch(session, url)
+                soup = BeautifulSoup(html, "html.parser")
+            except:
+                 return Exception
             # Extract site name from URL
             domain = get_domain_from_url(url)
             # Create a directory for each site
@@ -62,6 +85,7 @@ async def scrape_and_save_data(url: str):
             driver.save_screenshot(screenshot_path)
             # Extract text from the site
             text = soup.get_text()
+            text = format_text(text)
             # Add the found URLs to urls_to_parse
             links = soup.find_all('a', href=True)
             url_array = [link['href'] for link in links if link['href'].startswith(('http://', 'https://'))]
@@ -73,9 +97,7 @@ async def scrape_and_save_data(url: str):
             
             db_helper.write_in_data(url, os.path.abspath(screenshot_path), text, domain)
             print(f"Сохранены данные для сайта {url} в папку {full_path}")
-        except Exception as e:
-            db_helper.add_to_error(url, get_domain_from_url(url))
-            print(f"Не удалось обработать сайт {url} по причине  в папку {e}")
+        
 
 def add_finded_URLs(links):
     # Extract and add the URLs to urls_to_parse
@@ -92,21 +114,60 @@ def add_finded_URLs(links):
 
         db_helper.increment_domain_count_queue(domain)
 
-async def main():
-    while True:
+async def queue_collection():
+    try:
         row = db_helper.get_row_from_queue_with_min_domain_count()
         url = row[1]
         domain = row[2]
-        if url == None:
-            break
         await scrape_and_save_data(url)
 
         db_helper.increment_domain_count_data(domain)
 
         db_helper.remove_from_queue(url)
         db_helper.decrement_domain_count_queue(domain)
+    except Exception as e:
+            db_helper.add_to_error(url, get_domain_from_url(url))
+            print(f"Не удалось обработать сайт {url} по причине  в папку {e}")
 
-asyncio.run(main())
 
-driver.quit()
+async def phishing_collection():
+    try:
+        url = db_helper.get_url_from_fishing()
+
+        domain = get_domain_from_url(url)
+    
+        if not db_helper.check_domain_exist(domain):
+            db_helper.write_in_domain(domain, 0, 0)
+
+            db_helper.increment_domain_count_queue(domain)
+        
+        exept = await scrape_and_save_data(url)
+        if exept == Exception:
+            raise Exception
+        
+        
+        db_helper.increment_domain_count_data(domain)
+        db_helper.fill_collected_data_field(url, True)
+    except Exception as e:
+            db_helper.fill_collected_data_field(url, False)
+            
+driver = get_webdriver()
+count = 0
+
+scenario = input("Введите сценарий сбора данных:\n1 - сбор из очереди\n2 - сбор из базы фишинга\n")
+
+while True:
+        if int(scenario) == 1:
+            asyncio.run(queue_collection())
+        if int(scenario) == 2:
+            asyncio.run(phishing_collection())
+        
+        count = count + 1
+        
+        if count == 10:
+            count = 0
+            driver.quit()
+            driver = get_webdriver()
+            
+
 db_helper.close_connection()
