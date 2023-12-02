@@ -27,14 +27,15 @@ def clean_array(arr):
     cleaned = [str(x) for x in arr if x is not None and str(x).lower() != 'nan']
     return cleaned
 
-def batch_generator(texts, batch_size):
+def batch_generator(texts, labels, batch_size):
     # Создание бесконечного цикла, чтобы генератор продолжал возвращать данные
     while True:
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i+batch_size]
+            batch_labels = labels[i:i+batch_size]
             data = tokenizer.texts_to_sequences(batch_texts)
             data_pad = pad_sequences(data, maxlen=max_len)
-            yield data_pad
+            yield data_pad, np.array(batch_labels)
 
 # Загрузка данных из CSV-файла
 legitime_texts = pd.read_csv('texts.csv', sep='\t', encoding='utf-16', dtype=str)
@@ -53,6 +54,10 @@ texts = legitime_texts_array + phishing_texts_array
 legitime_count = len(legitime_texts_array)
 phishing_count = len(phishing_texts_array)
 
+legitime_labels = [1] * legitime_count
+phishing_labels = [0] * phishing_count
+labels = legitime_labels + phishing_labels
+
 words_count = count_words_in_texts(texts)
 max_len = count_max_len_in_texts(texts)
 
@@ -63,15 +68,13 @@ tokenizer = Tokenizer(num_words=words_count,
     char_level=False)
 tokenizer.fit_on_texts(texts)
 
-data = tokenizer.texts_to_sequences(texts)
-data_pad = pad_sequences(data, maxlen=max_len)
+#data = tokenizer.texts_to_sequences(texts)
+#data_pad = pad_sequences(data, maxlen=max_len)
 
-X = data_pad
-Y = np.array([[1, 0]]*legitime_count + [[0, 1]]*phishing_count)
+batch_size = 100  # Выберите размер батча, который подходит для вашей системы
+steps_per_epoch = len(texts) // batch_size  # Количество шагов на эпоху
 
-indeces = np.random.choice(X.shape[0], size=X.shape[0], replace=False)
-X = X[indeces]
-Y = Y[indeces]
+train_generator = batch_generator(texts, labels, batch_size)
 
 # создание модели
 model = Sequential()
@@ -83,7 +86,7 @@ model.add(Dense(1, activation='sigmoid'))
 
 # компиляция и обучение модели
 model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-history = model.fit(X, Y, batch_size=32, epochs=20,validation_split=0.2,)
+history = model.fit(train_generator, steps_per_epoch=steps_per_epoch, epochs=20,validation_split=0.2,)
 
 plt.plot(history.history['categorical_accuracy'])
 plt.title('Model accuracy')
