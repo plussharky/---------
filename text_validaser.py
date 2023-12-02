@@ -6,8 +6,9 @@ from langdetect import detect
 conn = sqlite3.connect('database.db')
 c = conn.cursor()
 
-c.execute("SELECT ID, site_text FROM website_data")
+c.execute("SELECT ID, site_text FROM website_data WHERE language IS Null")
 rows = c.fetchall()
+count = 0
 
 for row in rows:
     try:
@@ -15,16 +16,12 @@ for row in rows:
         id = row[0]
         text = row[1]
         lang = detect(text)
-        if lang == 'ru':
-            words = re.findall(r'\b\w+\b', text)
-            result = ' '.join(words)
-            result = re.sub(r'(?<=\w)(?=[А-Я])', ' ', result)
-            c.execute("UPDATE website_data SET site_text = ? WHERE ID = ?", (result,id,))
+        c.execute("UPDATE website_data SET language = ? WHERE ID = ?", (lang,id,))
+        print(f'В строке {id} установлен язык {lang}')
+        count = count + 1
+        if count == 100:
+            count = 0
             conn.commit()
-            print(f'В строке {id} русский текст теперь форматирован')
-            continue
-        print(f'В строке {id} не на русском языке')
+            print(f"Сделан коммит БД")
     except:
         print(f"Language detection failed for row ID: {row[0]}")
-
-print(result)

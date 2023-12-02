@@ -11,6 +11,7 @@ import requests
 import re
 import os
 from langdetect import detect
+import concurrent.futures
     
 def get_domain_from_url(url: str):
     parsed_url = urlparse(url)
@@ -36,8 +37,7 @@ def format_text(text):
 def define_language(text):
     return detect(text)
 
-# Папка датасета
-dataset_directory = 'dataset'
+
 
 def get_webdriver():
     ## Настройка драйвера Google Chrome
@@ -62,6 +62,12 @@ def get_webdriver():
 # Подключение к базе данных
 db_helper = DatabaseHelper('database.db')
 
+# Папка датасета
+dataset_directory = 'dataset'
+
+# Создайте объект блокировки
+lock = asyncio.Lock()
+
 async def scrape_and_save_data(url: str):
     async with aiohttp.ClientSession() as session:
             html = None
@@ -72,7 +78,8 @@ async def scrape_and_save_data(url: str):
             except:
                  return Exception
             # Extract site name from URL
-            domain = get_domain_from_url(url)
+            async with lock:
+                domain = get_domain_from_url(url)
             # Create a directory for each site
             site_directory = str(db_helper.get_last_id())
             full_path = os.path.join(dataset_directory, site_directory)
@@ -80,9 +87,10 @@ async def scrape_and_save_data(url: str):
             # Save a screenshot
             screenshot_filename = f"screenshot-{domain}.png"
             screenshot_path = os.path.join(full_path, screenshot_filename)
-            driver.get(url)
-            driver.implicitly_wait(10)
-            driver.save_screenshot(screenshot_path)
+            async with lock:
+                driver.get(url)
+                driver.implicitly_wait(10)
+                driver.save_screenshot(screenshot_path)
             # Extract text from the site
             text = soup.get_text()
             text = format_text(text)
@@ -153,8 +161,9 @@ async def phishing_collection():
             db_helper.fill_collected_data_field(url, False)
 
 async def ruphishing_collection():
-    url = db_helper.get_url_from_rufishing()
     try:
+        url = db_helper.get_url_from_rufishing()
+
         domain = get_domain_from_url(url)
     
         if not db_helper.check_domain_exist(domain):
@@ -177,13 +186,36 @@ count = 0
 
 scenario = input("Введите сценарий сбора данных:\n1 - сбор из очереди\n2 - сбор из базы фишинга\n3 - сбор из базы русского фишинга")
 
+def process_queue_collection():
+    asyncio.run(queue_collection())
+
+def process_phishing_collection():
+    asyncio.run(phishing_collection())
+
+def process_ruphishing_collection():
+    asyncio.run(ruphishing_collection())
+
+
+
+count = count + 1
+
+if count == 10:
+    count = 0
+    driver.quit()
+    driver = get_webdriver()
+
 while True:
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+    # Запуск каждого метода в отдельном потоке
         if int(scenario) == 1:
-            asyncio.run(queue_collection())
-        if int(scenario) == 2:
-            asyncio.run(phishing_collection())
-        if int(scenario) == 3:
-            asyncio.run(ruphishing_collection())
+            executor.submit(process_queue_collection)
+        elif int(scenario) == 2:
+            executor.submit(process_phishing_collection)
+        elif int(scenario) == 3:
+            executor.submit(process_ruphishing_collection)
+
+        # Дождитесь завершения всех потоков перед продолжением
+        executor.shutdown(wait=True)
         
         count = count + 1
         

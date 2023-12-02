@@ -85,9 +85,9 @@ class DatabaseHelper:
             print("Ошибка при работе с базой данных:", e)
             return False
     
-    def write_in_data(self, url, screenshot_path, site_text, domain):
-        self.cursor.execute("INSERT INTO website_data (url, screenshot_path, site_text, domain) VALUES (?, ?, ?, ?)",
-                            (url, screenshot_path, site_text, domain))
+    def write_in_data(self, url, screenshot_path, site_text, domain, lang):
+        self.cursor.execute("INSERT INTO website_data (url, screenshot_path, site_text, domain, language) VALUES (?, ?, ?, ?, ?)",
+                            (url, screenshot_path, site_text, domain, lang))
         self.conn.commit()
 
     # Методы для работы с таблицей queue
@@ -141,6 +141,29 @@ class DatabaseHelper:
                     SELECT *
                     FROM domains
                     WHERE URLs_in_queue > 0 
+                    ORDER BY URLs_in_data 
+                    LIMIT 1) as d
+                ON d.domain = q.domain
+                LIMIT 1;
+            ''')
+            min_domain = self.cursor.fetchone()
+
+            print(f"Выбранный URL с наименьшим доменом: {min_domain[1]}")
+
+            return min_domain if min_domain else None
+        except sqlite3.Error as e:
+            print("Ошибка при получении записи из очереди с наименьшим количеством данных:", e)
+
+    def get_ru_row_from_queue_with_min_domain_count(self):
+        try:
+            # Выбираем уникальные домены из таблицы "website_data" и подсчитываем количество записей для каждого домена
+            self.cursor.execute('''
+                SELECT q.* 
+                FROM queue AS q
+                INNER JOIN (
+                    SELECT *
+                    FROM domains
+                    WHERE URLs_in_queue > 0 AND domain LIKE '%.ru'
                     ORDER BY URLs_in_data 
                     LIMIT 1) as d
                 ON d.domain = q.domain
@@ -265,6 +288,36 @@ class DatabaseHelper:
     def exist_in_phishing(self, url: str):
         try:
             self.cursor.execute("SELECT * FROM phishing WHERE url=? LIMIT 1", (url,))
+            result = self.cursor.fetchone()
+            if result:
+                return True
+            else:
+                return False
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+            return False
+        
+    # Методы для работы с таблицей ruphishing
+    def get_url_from_rufishing(self):
+        try:
+            self.cursor.execute("SELECT p.url FROM ruphishing p LEFT JOIN website_data w ON p.url = w.URL WHERE w.URL IS NULL AND p.data_collected IS NULL LIMIT 1;")
+            url = self.cursor.fetchone()[0]
+            return url
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+            return False
+        
+    def fill_collected_data_field_in_ruphishing(self, url, success):
+        try:
+            self.cursor.execute("UPDATE ruphishing SET data_collected = ? WHERE url = ?;", (str(success), url))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print("Ошибка при работе с базой данных:", e)
+            return False
+        
+    def exist_in_ruphishing(self, url: str):
+        try:
+            self.cursor.execute("SELECT * FROM ruphishing WHERE url=? LIMIT 1", (url,))
             result = self.cursor.fetchone()
             if result:
                 return True
